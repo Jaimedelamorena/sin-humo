@@ -1,7 +1,7 @@
 {
   "name": "Sin Humo",
   "short_name": "Sin Humo",
-  "description": "Cuenta el dinero y los cigarros que te ahorras al dejar de fumar.",
+  "description": "Cuenta el dinero y las tereas que te ahorras al dejar de fumar.",
   "lang": "es-ES",
   "start_url": "./",
   "scope": "./",

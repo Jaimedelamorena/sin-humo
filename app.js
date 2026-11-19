@@ -3,32 +3,37 @@
   'use strict';
 
   const C = window.Calc;
-  const KEY = 'sinhumo.v1';
+  const KEY = 'sinhumo.v1'; // misma clave de siempre: así no se pierde nada de lo apuntado
+  const VERSION = 2;
   const HINT_KEY = 'sinhumo.hint-closed';
   const $ = (id) => document.getElementById(id);
 
   // ---------- Formatos
   const fmtMoney = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
+  const fmtMoneySigned = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', signDisplay: 'exceptZero' });
   const fmtInt = new Intl.NumberFormat('es-ES');
+  const fmtIntSigned = new Intl.NumberFormat('es-ES', { signDisplay: 'exceptZero' });
   const fmtDec1 = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 });
   const fmtLong = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
   const fmtDayMonth = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long', timeZone: 'UTC' });
   const fmtMonth = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const longDate = (d) => fmtLong.format(C.parse(d)).replace(',', '');
-  const plural = (n, one, many) => `${fmtInt.format(n)} ${n === 1 ? one : many}`;
-  const DOW = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
-  const COLS = [1, 2, 3, 4, 5, 7, 8]; // columna de la rejilla para cada día (6 = separación del finde)
+  const plural = (n, one, many) => `${fmtInt.format(n)} ${Math.abs(n) === 1 ? one : many}`;
+  const tereas = (n) => plural(n, 'terea', 'tereas');
+  const DOW = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+  const colOf = (date) => ((C.weekday(date) + 6) % 7) + 1; // lunes = 1 … domingo = 7
   const STATUS_TEXT = {
-    clean: 'sin fumar', one: 'solo 1', broken: '2 o más', pending: 'sin apuntar',
+    green: 'día verde', amber: 'justo lo normal', red: 'día rojo', pending: 'sin apuntar',
     today: 'hoy, sin apuntar', future: 'todavía no ha llegado', before: 'antes de empezar',
   };
 
   // ---------- Datos
   const isISO = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
   function emptyState() {
-    return { version: 1, settings: { ...C.DEFAULT_SETTINGS }, days: {}, celebrated: {} };
+    return { version: VERSION, settings: { ...C.DEFAULT_SETTINGS }, days: {}, celebrated: {} };
   }
+  /** Limpia y completa datos (también los de la versión 1: sin cervezas → 0, sin fiesta → no) */
   function normalize(raw) {
     const st = emptyState();
     if (!raw || typeof raw !== 'object') return st;
@@ -44,19 +49,37 @@
       packSize: num(s.packSize, 1, true, D.packSize),
       normalDay: num(s.normalDay, 0, true, D.normalDay),
       partyDay: num(s.partyDay, 0, true, D.partyDay),
+      perBeer: num(s.perBeer, 0, true, D.perBeer),
     };
     for (const [d, e] of Object.entries(raw.days || {})) {
       if (isISO(d) && e && Number.isInteger(e.smoked) && e.smoked >= 0) {
-        st.days[d] = { smoked: e.smoked, party: C.isFriSat(d) && !!e.party };
+        st.days[d] = {
+          smoked: e.smoked,
+          beers: Number.isInteger(e.beers) && e.beers >= 0 ? e.beers : 0,
+          party: C.isPartyDay(d) && !!e.party,
+        };
       }
     }
-    for (const k of Object.keys(raw.celebrated || {})) st.celebrated[k] = true;
+    for (const k of Object.keys(raw.celebrated || {})) {
+      if (k.startsWith('star:') || k.startsWith('trophy:')) st.celebrated[k] = true;
+    }
     return st;
+  }
+  /** Los logros que ya existían con las reglas nuevas se cuentan, pero no se celebran */
+  function markAllCelebrated(st) {
+    for (const k of C.achievementKeys(st, C.todayISO())) st.celebrated[k] = true;
   }
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      return raw ? normalize(JSON.parse(raw)) : emptyState();
+      if (!raw) return emptyState();
+      const data = JSON.parse(raw);
+      const st = normalize(data);
+      if (data.version !== VERSION) {
+        markAllCelebrated(st);
+        localStorage.setItem(KEY, JSON.stringify(st));
+      }
+      return st;
     } catch (_) {
       return emptyState();
     }
@@ -79,21 +102,22 @@
   function render() {
     const t = today();
     lastToday = t;
-    const s = state.settings;
     const tot = C.totals(state, t);
 
-    $('stat-money').textContent = fmtMoney.format(tot.money);
-    $('stat-cigs').textContent = fmtInt.format(tot.cigs);
-    $('stat-packs').textContent = fmtDec1.format(tot.cigs / s.packSize);
+    $('stat-balance').textContent = fmtMoneySigned.format(tot.balanceMoney);
+    $('stat-balance-cigs').textContent = !tot.logged
+      ? 'Apunta tu primer día para empezar'
+      : tot.balance >= 0
+        ? `${tereas(tot.balance)} menos de lo que fumarías normalmente`
+        : `${tereas(-tot.balance)} más de lo normal. Se anota y seguimos 💪`;
+    $('stat-saved-money').textContent = fmtMoney.format(tot.savedMoney);
+    $('stat-saved-cigs').textContent = tereas(tot.saved);
+    $('stat-spent-money').textContent = fmtMoney.format(tot.spentMoney);
+    $('stat-spent-cigs').textContent = `${tereas(tot.smoked)} · ${fmtDec1.format(tot.packsSmoked)} cajetillas`;
 
-    const streak = C.currentStreak(state, t);
-    $('stat-streak').textContent = plural(streak, 'día', 'días');
-    $('stat-best').textContent = plural(C.bestStreak(state, t), 'día', 'días');
-    $('flame').classList.toggle('off', streak === 0);
-
-    $('stat-weeks').textContent = fmtInt.format(C.completedWeeks(state, t).length);
-    $('stat-megas').textContent = fmtInt.format(C.megaNights(state, t).length);
-    $('stat-clean').textContent = fmtInt.format(tot.clean);
+    $('stat-trophies').textContent = fmtInt.format(tot.trophies);
+    $('stat-stars').textContent = fmtInt.format(tot.stars);
+    $('stat-green').textContent = fmtInt.format(tot.green);
 
     renderWeek(t);
     renderPending(t);
@@ -101,35 +125,87 @@
     renderCalendar(t);
   }
 
+  // ---------- Resumen de la semana (lunes a domingo)
+  let weekMonday = null; // null = la semana de hoy
+
+  function weekRange(monday) {
+    const a = C.parse(monday);
+    const b = C.parse(C.addDays(monday, 6));
+    return a.getUTCMonth() === b.getUTCMonth()
+      ? `${a.getUTCDate()} al ${fmtDayMonth.format(b)}`
+      : `${fmtDayMonth.format(a)} al ${fmtDayMonth.format(b)}`;
+  }
+
   function renderWeek(t) {
     const start = state.settings.startDate;
-    const sun = C.sundayOf(t);
-    const block = C.weekBlock(sun, state, t);
-    const wrap = $('week-dots');
-    wrap.replaceChildren(
-      ...block.map((d, i) => {
+    const current = C.mondayOf(t);
+    const monday = weekMonday || current;
+    const w = C.weekSummary(monday, state, t);
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const date = C.addDays(monday, i);
+      days.push({ date, status: C.dayStatus(date, state, t), entry: state.days[date] });
+    }
+
+    $('week-title').textContent =
+      monday === current ? 'Esta semana' : monday === C.addDays(current, -7) ? 'Semana pasada' : 'Semana';
+    $('week-range').textContent = `Del lunes ${weekRange(monday)}`;
+
+    $('week-dots').replaceChildren(
+      ...days.map((d, i) => {
         const el = document.createElement('div');
         el.className = `wdot s-${d.status}`;
         el.textContent = DOW[i];
+        const trophy = d.entry && C.isTrophy(d.date, d.entry);
+        if (trophy) el.classList.add('trophy');
+        if (d.date === w.starDate || trophy) {
+          const b = document.createElement('span');
+          b.className = 'badge';
+          b.textContent = trophy ? '🏆' : '⭐';
+          el.append(b);
+        }
         el.title = `${cap(longDate(d.date))}: ${STATUS_TEXT[d.status]}`;
         return el;
       })
     );
-    const good = block.filter((d) => C.keepsStreak(d.status)).length;
-    $('week-count').textContent = `${good}/5`;
 
     let msg = '';
-    if (!start) msg = '';
-    else if (sun < start) msg = `Tu primera semana completa empieza el domingo ${fmtDayMonth.format(C.parse(C.addDays(sun, 7)))}.`;
-    else if (block.some((d) => d.status === 'broken')) msg = 'Esta semana se ha cortado. El domingo empieza otra 💪';
-    else if (good === 5) msg = '¡Semana completa! 🏆';
-    else if (block.some((d) => d.status === 'pending')) msg = 'Te falta apuntar algún día de esta semana.';
-    else {
-      const left = 5 - good;
-      msg = `Llevas ${good} de 5. ${left === 1 ? 'Te falta 1 día' : `Te faltan ${left} días`} para celebrarlo.`;
+    if (start) {
+      const open = days.filter((d) => ['today', 'future', 'pending'].includes(d.status)).length;
+      if (w.starDate) msg = '⭐ ¡Semana conseguida! 5 días verdes.';
+      else if (w.green + open >= 5) {
+        const left = 5 - w.green;
+        msg = `Llevas ${w.green} de 5 días verdes: ${left === 1 ? 'te falta 1' : `te faltan ${left}`} para la ⭐.`;
+      } else if (monday === current) msg = `Llevas ${w.green} de 5 días verdes. Esta semana ya no da para la ⭐, pero cada día verde suma 💪`;
+      else msg = `Esta semana se quedó en ${w.green} de 5 días verdes.`;
     }
-    if (start && C.isFriSat(t)) msg += ' Finde: si sales y no fumas ninguno, ¡MEGA RACHA! 🪩';
-    $('week-msg').textContent = msg.trim();
+    $('week-msg').textContent = msg;
+
+    $('w-saved').textContent = fmtInt.format(w.saved);
+    $('w-saved-money').textContent = fmtMoney.format(w.savedMoney);
+    $('w-spent').textContent = fmtInt.format(w.smoked);
+    $('w-spent-money').textContent = fmtMoney.format(w.spentMoney);
+    $('w-balance').textContent = fmtIntSigned.format(w.balance);
+    $('w-balance-money').textContent = fmtMoneySigned.format(w.balanceMoney);
+
+    const parts = [`✅ ${plural(w.green, 'día verde', 'días verdes')}`];
+    if (w.amber) parts.push(`${w.amber} ámbar`);
+    if (w.red) parts.push(`${w.red} ${w.red === 1 ? 'rojo' : 'rojos'}`);
+    $('w-days').textContent = parts.join(' · ');
+    const ach = [];
+    if (w.trophies) ach.push(`🏆 ×${w.trophies}`);
+    if (w.starDate) ach.push('⭐');
+    $('w-achievements').textContent = ach.length ? `Logros: ${ach.join(' · ')}` : 'Sin logros todavía';
+
+    $('week-prev').disabled = !start || monday <= C.mondayOf(start);
+    $('week-next').disabled = monday >= current;
+  }
+
+  function shiftWeek(delta) {
+    const t = today();
+    const next = C.addDays(weekMonday || C.mondayOf(t), 7 * delta);
+    weekMonday = next >= C.mondayOf(t) ? null : next;
+    renderWeek(t);
   }
 
   function renderPending(t) {
@@ -138,22 +214,18 @@
     banner.hidden = pend.length === 0;
     if (pend.length) {
       $('pending-text').textContent =
-        pend.length === 1
-          ? `Te falta apuntar el ${longDate(pend[0])}`
-          : `Tienes ${pend.length} días sin apuntar`;
+        pend.length === 1 ? `Te falta apuntar el ${longDate(pend[0])}` : `Tienes ${pend.length} días sin apuntar`;
       banner.dataset.date = pend[0];
     }
   }
 
   function renderTodayButton(t) {
     const e = state.days[t];
-    $('btn-today').textContent = e
-      ? `Hoy: ${plural(e.smoked, 'cigarro', 'cigarros')} · Editar`
-      : 'Apuntar hoy';
+    $('btn-today').textContent = e ? `Hoy: ${tereas(e.smoked)} · Editar` : 'Apuntar hoy';
     $('btn-today').disabled = !state.settings.startDate;
   }
 
-  // ---------- Calendario
+  // ---------- Calendario (lunes a domingo)
   let view = null; // { y, m } con m de 0 a 11
   const monthIndex = (iso) => {
     const d = C.parse(iso);
@@ -168,42 +240,48 @@
     const first = new Date(Date.UTC(view.y, view.m, 1));
     $('cal-title').textContent = cap(fmtMonth.format(first));
     const daysInMonth = new Date(Date.UTC(view.y, view.m + 1, 0)).getUTCDate();
-    const weekThursdays = new Set(C.completedWeeks(state, t).map((sun) => C.addDays(sun, 4)));
+    const starDates = new Set(C.starWeeks(state, t).map((w) => w.date));
 
     const cells = [];
     for (let n = 1; n <= daysInMonth; n++) {
       const d = C.fmt(new Date(Date.UTC(view.y, view.m, n)));
       const st = C.dayStatus(d, state, t);
       const e = state.days[d];
-      const wd = C.weekday(d);
-      const party = !!(e && e.party && C.isFriSat(d));
-      const mega = C.isMegaNight(d, e);
+      const counted = st !== 'before' && st !== 'future';
+      const info = e && counted ? C.dayCalc(d, e, state.settings) : null;
 
       const b = document.createElement('button');
       b.type = 'button';
       b.className = `day s-${st}`;
-      if (wd >= 5) b.classList.add('wk');
+      if (C.isPartyDay(d)) b.classList.add('wk');
       if (d === t) b.classList.add('is-today');
-      if (mega) b.classList.add('mega');
-      b.style.gridColumn = String(COLS[wd]);
+      if (info && info.trophy) b.classList.add('trophy');
+      b.style.gridColumn = String(colOf(d));
       b.dataset.date = d;
-      b.disabled = st === 'before' || st === 'future';
+      b.disabled = !counted;
 
       const num = document.createElement('span');
       num.textContent = n;
       b.append(num);
-      if (party || weekThursdays.has(d)) {
-        const badge = document.createElement('span');
-        badge.className = 'badge';
-        badge.textContent = party ? '🎉' : '🏆';
-        b.append(badge);
-      }
+      const badge = (text, cls) => {
+        const s = document.createElement('span');
+        s.className = `badge ${cls || ''}`;
+        s.textContent = text;
+        b.append(s);
+      };
+      if (info && info.trophy) badge('🏆', 'big');
+      else if (info && info.party) badge('🎉');
+      else if (info && info.beers > 0) badge('🍺');
+      if (starDates.has(d)) badge('⭐', 'star');
 
       let label = `${longDate(d)}: ${STATUS_TEXT[st]}`;
-      if (e && st !== 'before' && st !== 'future') label += ` (${plural(e.smoked, 'cigarro', 'cigarros')})`;
-      if (party) label += ', saliste de fiesta';
-      if (mega) label += ', mega racha';
-      if (weekThursdays.has(d)) label += ', semana limpia';
+      if (info) {
+        label += ` (${tereas(info.smoked)}, lo normal ${info.base})`;
+        if (info.party) label += ', saliste de fiesta';
+        if (info.beers) label += `, ${plural(info.beers, 'cerveza', 'cervezas')}`;
+        if (info.trophy) label += ', mayor logro';
+      }
+      if (starDates.has(d)) label += ', ⭐ semana conseguida';
       if (d === t) label += ', hoy';
       b.setAttribute('aria-label', label);
       cells.push(b);
@@ -211,8 +289,7 @@
     $('cal-days').replaceChildren(...cells);
 
     const cur = view.y * 12 + view.m;
-    const minM = monthIndex(state.settings.startDate || t);
-    $('cal-prev').disabled = cur <= minM;
+    $('cal-prev').disabled = cur <= monthIndex(state.settings.startDate || t);
     $('cal-next').disabled = cur >= monthIndex(t);
   }
 
@@ -227,8 +304,7 @@
       ...DOW.map((l, i) => {
         const s = document.createElement('span');
         s.textContent = l;
-        s.style.gridColumn = String(COLS[i]);
-        if (i >= 5) s.className = 'wk';
+        if (i >= 3 && i <= 5) s.className = 'wk'; // jueves, viernes, sábado
         return s;
       })
     );
@@ -246,6 +322,7 @@
     void el.offsetHeight; // fuerza el reflow para que se vea la animación
     scrim.classList.add('show');
     el.classList.add('show');
+    el.scrollTop = 0;
     openSheetEl = el;
     sheetDismissable = dismissable;
     document.body.classList.add('locked');
@@ -264,79 +341,100 @@
     }, 300);
   }
 
-  // ---------- Apuntar un día
+  // ---------- Apuntar un día: cervezas → fiesta (jue–sáb) → tereas
   const CHIPS = [0, 1, 2, 3, 5, 10, 20];
-  let edit = null; // { date, smoked, party: true | false | null }
+  let edit = null; // { date, beers, party: true | false | null, smoked }
 
   function openDay(d) {
     const t = today();
     const st = C.dayStatus(d, state, t);
     if (st === 'before' || st === 'future') return;
     const e = state.days[d];
-    const fs = C.isFriSat(d);
+    const pd = C.isPartyDay(d);
     edit = {
       date: d,
+      beers: e ? e.beers || 0 : 0,
+      party: pd ? (e ? !!e.party : null) : false,
       smoked: e ? e.smoked : 0,
-      party: fs ? (e ? !!e.party : null) : false,
     };
     $('day-title').textContent = cap(longDate(d)) + (d === t ? ' · hoy' : '');
-    $('party-row').hidden = !fs;
+    $('party-row').hidden = !pd;
+    $('smoked-label').textContent = `${pd ? 3 : 2}. ¿Cuántas tereas fumaste?`;
     $('day-delete').hidden = !e;
     renderEditor();
     openSheet($('sheet-day'));
   }
 
+  function baseReason(c) {
+    const s = state.settings;
+    const beerBase = s.perBeer * c.beers;
+    if (c.party && s.partyDay >= beerBase && s.partyDay > s.normalDay) return 'por la fiesta';
+    if (beerBase > s.normalDay) return `${plural(c.beers, 'cerveza', 'cervezas')} × ${s.perBeer}`;
+    return 'día normal';
+  }
+
   function renderEditor() {
-    const fs = C.isFriSat(edit.date);
+    const pd = C.isPartyDay(edit.date);
+    $('beer-value').textContent = edit.beers;
+    $('beer-minus').disabled = edit.beers <= 0;
+    $('beer-plus').disabled = edit.beers >= 30;
     $('step-value').textContent = edit.smoked;
     $('step-minus').disabled = edit.smoked <= 0;
     $('step-plus').disabled = edit.smoked >= 99;
 
     document.querySelectorAll('#party-row [data-party]').forEach((b) => {
-      const v = b.dataset.party === '1';
-      b.setAttribute('aria-checked', String(edit.party === v));
+      b.setAttribute('aria-checked', String(edit.party === (b.dataset.party === '1')));
     });
-    document.querySelector('#party-row .seg').classList.toggle('need', fs && edit.party === null);
-
+    document.querySelector('#party-row .seg').classList.toggle('need', pd && edit.party === null);
     document.querySelectorAll('#chips .chip').forEach((c) => {
       c.classList.toggle('on', Number(c.dataset.n) === edit.smoked);
     });
 
     const pv = $('day-preview');
-    if (fs && edit.party === null) {
-      pv.innerHTML = '<p>Dime si has salido de fiesta para calcular lo que te ahorras.</p>';
+    if (pd && edit.party === null) {
+      pv.innerHTML = '<p>Dime si saliste de fiesta para calcular lo normal de hoy.</p>';
       $('day-save').disabled = true;
-      $('day-save').textContent = 'Elige si has salido';
+      $('day-save').textContent = 'Elige si saliste';
       return;
     }
     $('day-save').disabled = false;
     $('day-save').textContent = 'Guardar';
 
-    const sv = C.daySavings(edit.date, { smoked: edit.smoked, party: edit.party }, state.settings);
+    const c = C.dayCalc(edit.date, edit, state.settings);
     const pills = [];
-    if (edit.smoked === 0) pills.push('<span class="pill p-clean">✓ Día sin fumar</span>');
-    else if (edit.smoked === 1) pills.push('<span class="pill p-one">Solo 1 · la racha sigue</span>');
-    else pills.push('<span class="pill p-broken">Rompe la racha</span>');
-    if (C.isMegaNight(edit.date, edit)) pills.push('<span class="pill p-mega">🪩 MEGA RACHA</span>');
+    if (c.trophy) pills.push('<span class="pill p-trophy">🏆 MAYOR LOGRO: fiesta sin fumar</span>');
+    if (c.color === 'green') pills.push('<span class="pill p-green">✓ Día verde</span>');
+    else if (c.color === 'amber') pills.push('<span class="pill p-amber">Justo lo normal</span>');
+    else pills.push('<span class="pill p-red">Día rojo · se anota y seguimos</span>');
 
-    const line =
-      `Te habrías fumado <b>${sv.expected}</b>. ` +
-      (sv.cigs > 0
-        ? `Ahorras <b>${plural(sv.cigs, 'cigarro', 'cigarros')}</b> y <b>${fmtMoney.format(sv.money)}</b>.`
-        : 'Este día no suma ahorro (pero tampoco resta).');
-    pv.innerHTML = `<div class="pills">${pills.join('')}</div><p>${line}</p>`;
+    let note = '';
+    if (!c.special) note = 'Día normal: verde con 0 o 1 tereas.';
+    else if (c.color !== 'red') note = `Con fiesta o cervezas: verde si fumas menos de ${c.base}.`;
+
+    pv.innerHTML =
+      `<div class="pills">${pills.join('')}</div>` +
+      '<div class="calc-grid">' +
+      `<div><span>Lo normal</span><b>${c.base}</b><small>${baseReason(c)}</small></div>` +
+      `<div><span>Ahorro</span><b>${fmtIntSigned.format(c.saved)}</b><small>${fmtMoneySigned.format(c.savedMoney)}</small></div>` +
+      `<div><span>Gasto</span><b>${c.spent}</b><small>${fmtMoney.format(c.spentMoney)}</small></div>` +
+      '</div>' +
+      (note ? `<p class="preview-note">${note}</p>` : '');
   }
 
   function setSmoked(n) {
     edit.smoked = Math.max(0, Math.min(99, n));
     renderEditor();
   }
+  function setBeers(n) {
+    edit.beers = Math.max(0, Math.min(30, n));
+    renderEditor();
+  }
 
   function saveDay() {
     if (!edit) return;
-    const fs = C.isFriSat(edit.date);
-    if (fs && edit.party === null) return;
-    state.days[edit.date] = { smoked: edit.smoked, party: fs && !!edit.party };
+    const pd = C.isPartyDay(edit.date);
+    if (pd && edit.party === null) return;
+    state.days[edit.date] = { smoked: edit.smoked, beers: edit.beers, party: pd && !!edit.party };
     if (!save()) return;
     closeSheet();
     render();
@@ -354,7 +452,7 @@
     toast('Día borrado');
   }
 
-  // ---------- Celebraciones
+  // ---------- Celebraciones: ⭐ semana (normal) y 🏆 mayor logro (dorada y más grande)
   const queue = [];
   let celebrating = false;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -369,6 +467,7 @@
   }
 
   function nextCelebration() {
+    Confetti.stop();
     const key = queue.shift();
     const box = $('celebrate');
     if (!key) {
@@ -379,52 +478,40 @@
     celebrating = true;
     const [type, date] = key.split(':');
     const t = today();
-    box.classList.toggle('mega', type === 'mega');
+    box.classList.toggle('trophy', type === 'trophy');
     // reinicia las animaciones
     box.hidden = true;
     void box.offsetHeight;
     box.hidden = false;
 
-    if (type === 'week') {
-      const days = C.weekBlock(date, state, t);
-      const cigs = days.reduce((a, d) => a + C.savedCigs(d.date, state.days[d.date], state.settings), 0);
-      const n = C.completedWeeks(state, t).length;
-      $('cel-emoji').textContent = '🏆';
-      $('cel-kicker').textContent = 'Racha conseguida';
-      $('cel-title').textContent = '¡Semana limpia!';
+    if (type === 'star') {
+      const n = C.starWeeks(state, t).length;
+      $('cel-emoji').textContent = '⭐';
+      $('cel-kicker').textContent = 'Logro de semana';
+      $('cel-title').textContent = '¡5 días verdes!';
       $('cel-text').textContent =
-        `Del ${weekRange(date)} sin pasar de uno. ` +
-        `Esos 5 días te has ahorrado ${plural(cigs, 'cigarro', 'cigarros')} y ${fmtMoney.format(C.moneyFor(cigs, state.settings))}. ` +
-        (n === 1 ? '¡Tu primera semana limpia!' : `Ya llevas ${n} semanas limpias.`);
+        `Semana del lunes ${weekRange(date)}: ya tienes 5 días verdes. ` +
+        (n === 1 ? '¡Tu primera semana con ⭐!' : `Llevas ${n} semanas con ⭐.`);
       $('cel-ok').textContent = '¡Seguimos! 💪';
       if (!reducedMotion) Confetti.cannons(1);
       vibrate([60, 40, 60]);
     } else {
-      const sv = C.daySavings(date, state.days[date], state.settings);
-      const n = C.megaNights(state, t).length;
-      const dayName = C.weekday(date) === 5 ? 'viernes' : 'sábado';
-      $('cel-emoji').textContent = '🪩';
-      $('cel-kicker').textContent = 'Noche de fiesta sin fumar';
-      $('cel-title').textContent = 'MEGA RACHA';
+      const c = C.dayCalc(date, state.days[date], state.settings);
+      const n = C.trophyDays(state, t).length;
+      $('cel-emoji').textContent = '🏆';
+      $('cel-kicker').textContent = 'Saliste de fiesta y 0 tereas';
+      $('cel-title').textContent = 'MAYOR LOGRO';
       $('cel-text').textContent =
-        `Saliste de fiesta el ${dayName} ${fmtDayMonth.format(C.parse(date))} y no te fumaste ni uno. ` +
-        `${plural(sv.cigs, 'cigarro', 'cigarros')} y ${fmtMoney.format(sv.money)} que se quedan en tu bolsillo. ` +
-        (n === 1 ? '¡Tu primera mega racha!' : `Llevas ${n} mega rachas.`);
-      $('cel-ok').textContent = '¡A por la siguiente! 🪩';
+        `El ${longDate(date)} saliste de fiesta y no fumaste ninguna. ` +
+        `${tereas(c.saved)} y ${fmtMoney.format(c.savedMoney)} que se quedan en tu bolsillo. ` +
+        (n === 1 ? '¡Tu primer 🏆!' : `Ya llevas ${n} 🏆.`);
+      $('cel-ok').textContent = '¡A por el siguiente! 🏆';
       if (!reducedMotion) Confetti.mega();
       vibrate([100, 60, 100, 60, 300]);
     }
     box.scrollTop = 0;
     // sin preventScroll, enfocar el botón durante la animación de entrada desplaza la tarjeta
     setTimeout(() => $('cel-ok').focus({ preventScroll: true }), 50);
-  }
-
-  /** "domingo 8 al jueves 12 de noviembre" (o con los dos meses si cambia) */
-  function weekRange(sunday) {
-    const a = C.parse(sunday);
-    const b = C.parse(C.addDays(sunday, 4));
-    if (a.getUTCMonth() === b.getUTCMonth()) return `domingo ${a.getUTCDate()} al jueves ${fmtDayMonth.format(b)}`;
-    return `domingo ${fmtDayMonth.format(a)} al jueves ${fmtDayMonth.format(b)}`;
   }
 
   function vibrate(pattern) {
@@ -438,6 +525,7 @@
     const canvas = $('confetti');
     const ctx = canvas.getContext('2d');
     const COLORS = ['#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#a78bfa', '#f87171', '#fde68a', '#2dd4bf'];
+    const GOLD = ['#fde68a', '#fbbf24', '#f59e0b', '#fff7d6', '#fcd34d', '#ffffff'];
     const pick = (a) => a[(Math.random() * a.length) | 0];
     let parts = [];
     let raf = 0;
@@ -453,11 +541,11 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    function spawn(x, y, n, angle, spread, speed, emoji) {
+    function spawn(x, y, n, angle, spread, speed, opts = {}) {
       for (let i = 0; i < n; i++) {
         const a = angle + (Math.random() - 0.5) * spread;
         const v = speed * (0.45 + Math.random() * 0.75);
-        const useEmoji = emoji && Math.random() < 0.1;
+        const useEmoji = opts.emoji && Math.random() < 0.1;
         parts.push({
           x, y,
           vx: Math.cos(a) * v,
@@ -468,9 +556,9 @@
           vr: (Math.random() - 0.5) * 0.3,
           tilt: Math.random() * 6.28,
           vt: 0.05 + Math.random() * 0.1,
-          color: pick(COLORS),
+          color: pick(opts.colors || COLORS),
           shape: useEmoji ? 'emoji' : Math.random() < 0.3 ? 'circle' : 'rect',
-          emoji: useEmoji ? pick(emoji) : '',
+          emoji: useEmoji ? pick(opts.emoji) : '',
           life: 0,
           max: 220 + Math.random() * 140,
         });
@@ -523,36 +611,42 @@
       }
     }
 
-    function cannons(power, emoji) {
+    function cannons(power, opts) {
       size();
       const n = Math.round(70 * power);
       const sp = Math.max(14, H / 42);
-      spawn(-10, H * 0.82, n, -Math.PI / 3.2, 0.7, sp, emoji);
-      spawn(W + 10, H * 0.82, n, -Math.PI + Math.PI / 3.2, 0.7, sp, emoji);
+      spawn(-10, H * 0.82, n, -Math.PI / 3.2, 0.7, sp, opts);
+      spawn(W + 10, H * 0.82, n, -Math.PI + Math.PI / 3.2, 0.7, sp, opts);
     }
 
     // fuegos arriba y abajo, para no tapar el texto del centro
     let fwTop = true;
-    function firework(emoji) {
+    function firework(opts) {
       const y = fwTop ? 0.06 + Math.random() * 0.14 : 0.78 + Math.random() * 0.12;
       fwTop = !fwTop;
-      spawn(W * (0.12 + Math.random() * 0.76), H * y, 55, 0, Math.PI * 2, 8, emoji);
+      spawn(W * (0.12 + Math.random() * 0.76), H * y, 55, 0, Math.PI * 2, 8, opts);
     }
 
     function mega() {
-      const emoji = ['🎉', '🪩', '✨', '⭐', '💸'];
-      cannons(1.6, emoji);
-      for (let i = 0; i < 40; i++) spawn(Math.random() * W, -20 - Math.random() * 80, 1, Math.PI / 2, 0.6, 3, emoji);
+      const opts = { emoji: ['🏆', '✨', '⭐', '🎉', '💸'], colors: GOLD.concat(COLORS) };
+      cannons(1.6, opts);
+      for (let i = 0; i < 40; i++) spawn(Math.random() * W, -20 - Math.random() * 80, 1, Math.PI / 2, 0.6, 3, opts);
       let k = 0;
-      const timer = setInterval(() => {
+      clearInterval(timer);
+      timer = setInterval(() => {
         k++;
-        firework(emoji);
-        if (k % 2 === 0) cannons(0.8, emoji);
+        firework(opts);
+        if (k % 2 === 0) cannons(0.8, opts);
         if (k >= 8) clearInterval(timer);
       }, 380);
     }
+    let timer = 0;
+    /** Deja de lanzar fuegos (lo que ya está en el aire termina de caer) */
+    function stop() {
+      clearInterval(timer);
+    }
 
-    return { cannons, mega };
+    return { cannons, mega, stop };
   })();
 
   // ---------- Ajustes
@@ -563,9 +657,7 @@
     const price = parseNum($('set-price').value);
     const pack = parseNum($('set-pack').value);
     $('set-derived').textContent =
-      price > 0 && Number.isInteger(pack) && pack > 0
-        ? `Cada cigarro vale ${fmtMoney.format(price / pack)}.`
-        : '';
+      price > 0 && Number.isInteger(pack) && pack > 0 ? `Cada terea vale ${fmtMoney.format(price / pack)}.` : '';
   }
 
   function openSettings() {
@@ -576,6 +668,7 @@
     $('set-pack').value = s.packSize;
     $('set-normal').value = s.normalDay;
     $('set-party').value = s.partyDay;
+    $('set-beer').value = s.perBeer;
     updateDerived();
     openSheet($('sheet-settings'));
   }
@@ -586,15 +679,22 @@
     const pack = parseNum($('set-pack').value);
     const normal = parseNum($('set-normal').value);
     const party = parseNum($('set-party').value);
+    const beer = parseNum($('set-beer').value);
+    const isCount = (n) => Number.isInteger(n) && n >= 0;
     if (!isISO(start) || start > today()) return toast('Elige una fecha de inicio que no sea futura');
-    if (!(price > 0)) return toast('El precio del paquete tiene que ser mayor que 0');
-    if (!Number.isInteger(pack) || pack < 1) return toast('Cigarros por paquete: un número entero');
-    if (!Number.isInteger(normal) || normal < 0) return toast('Día normal: un número entero');
-    if (!Number.isInteger(party) || party < 0) return toast('Día de fiesta: un número entero');
-    state.settings = { startDate: start, packPrice: Math.round(price * 100) / 100, packSize: pack, normalDay: normal, partyDay: party };
+    if (!(price > 0)) return toast('El precio de la cajetilla tiene que ser mayor que 0');
+    if (!Number.isInteger(pack) || pack < 1) return toast('Tereas por cajetilla: un número entero');
+    if (!isCount(normal)) return toast('Día normal: un número entero');
+    if (!isCount(party)) return toast('Día de fiesta: un número entero');
+    if (!isCount(beer)) return toast('Por cada cerveza: un número entero');
+    state.settings = {
+      startDate: start, packPrice: Math.round(price * 100) / 100, packSize: pack,
+      normalDay: normal, partyDay: party, perBeer: beer,
+    };
     save();
     closeSheet();
     view = null;
+    weekMonday = null;
     render();
     toast('Ajustes guardados');
     setTimeout(checkCelebrations, 350);
@@ -631,12 +731,12 @@
       const next = normalize(data);
       const n = Object.keys(next.days).length;
       if (!confirm(`Esta copia tiene ${plural(n, 'día apuntado', 'días apuntados')}. ¿Reemplazar los datos actuales?`)) return;
-      // lo que ya estaba conseguido en la copia no se vuelve a celebrar
-      for (const k of C.achievementKeys(next, today())) next.celebrated[k] = true;
+      markAllCelebrated(next); // lo que ya estaba conseguido en la copia no se vuelve a celebrar
       state = next;
       save();
       closeSheet();
       view = null;
+      weekMonday = null;
       render();
       toast('Copia importada ✓');
       if (!state.settings.startDate) openWelcome();
@@ -651,6 +751,7 @@
     save();
     closeSheet();
     view = null;
+    weekMonday = null;
     render();
     setTimeout(openWelcome, 320);
   }
@@ -703,6 +804,8 @@
     });
     $('cal-prev').addEventListener('click', () => shiftMonth(-1));
     $('cal-next').addEventListener('click', () => shiftMonth(1));
+    $('week-prev').addEventListener('click', () => shiftWeek(-1));
+    $('week-next').addEventListener('click', () => shiftWeek(1));
     $('btn-today').addEventListener('click', () => openDay(today()));
     $('pending-banner').addEventListener('click', (ev) => {
       const d = ev.currentTarget.dataset.date;
@@ -720,13 +823,15 @@
         c.className = 'chip';
         c.dataset.n = n;
         c.textContent = n;
-        c.setAttribute('aria-label', plural(n, 'cigarro', 'cigarros'));
+        c.setAttribute('aria-label', tereas(n));
         c.addEventListener('click', () => setSmoked(n));
         return c;
       })
     );
     $('step-minus').addEventListener('click', () => setSmoked(edit.smoked - 1));
     $('step-plus').addEventListener('click', () => setSmoked(edit.smoked + 1));
+    $('beer-minus').addEventListener('click', () => setBeers(edit.beers - 1));
+    $('beer-plus').addEventListener('click', () => setBeers(edit.beers + 1));
     document.querySelectorAll('#party-row [data-party]').forEach((b) =>
       b.addEventListener('click', () => {
         edit.party = b.dataset.party === '1';
@@ -760,6 +865,7 @@
     const refreshIfNewDay = () => {
       if (today() !== lastToday) {
         view = null;
+        weekMonday = null;
         render();
       }
     };

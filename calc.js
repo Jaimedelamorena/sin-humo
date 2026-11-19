@@ -2,16 +2,22 @@
  * Sin Humo — lógica de cálculo (sin dependencias).
  * La usa la app en el navegador (window.Calc) y los tests en Node (require).
  *
- * Reglas:
- *  - Cigarros que me habría fumado: 10 un día normal; 20 un viernes o sábado
- *    en el que salgo de fiesta. Domingo a jueves siempre son días normales.
- *  - Ahorro del día = máx(0, habría fumado − he fumado). Fumar de más no resta.
- *  - Dinero = cigarros ahorrados × (precio del paquete / cigarros por paquete).
- *  - 0 cigarros = "sin fumar", 1 = "solo 1" (no rompe la racha), 2+ rompe.
- *  - Un día pasado sin apuntar rompe la racha hasta que se rellena.
- *    Hoy sin apuntar todavía no rompe nada.
- *  - Semana limpia: domingo a jueves de una misma semana, todos con 0 o 1.
- *  - Mega racha: cada viernes o sábado de fiesta con 0 cigarros.
+ * Reglas (versión 2):
+ *  - Cada día se apunta: cervezas (0 o más), si saliste de fiesta (solo jueves,
+ *    viernes y sábado) y cuántas tereas fumaste.
+ *  - Base del día (lo que habría fumado) = el MAYOR de:
+ *      10 (día normal) · 20 (si salí de fiesta) · 5 × cervezas
+ *  - Ahorro del día = base − fumadas (puede ser negativo).
+ *    Gasto del día = fumadas. Dinero = tereas × (precio cajetilla / tereas por cajetilla).
+ *  - Totales: "ahorrado" suma solo los días en positivo; "balance" suma
+ *    (base − fumadas) de todos los días, también los negativos. Nada se resta dos veces.
+ *  - Color: día normal → verde con 0 o 1, rojo con más.
+ *           día con fiesta o cervezas (aunque sea 1) → verde si fumé menos que la base,
+ *           ámbar si fumé justo la base, rojo si fumé más.
+ *  - 🏆 Mayor logro: salí de fiesta y fumé 0.
+ *  - ⭐ Logro de semana: 5 días verdes en la misma semana (lunes a domingo).
+ *    Se consigue el día del quinto verde. Como máximo una por semana.
+ *  - Un día sin apuntar no cuenta para nada (ni suma ni resta).
  */
 (function (root, factory) {
   const api = factory();
@@ -22,10 +28,11 @@
 
   const DEFAULT_SETTINGS = Object.freeze({
     startDate: null, // 'YYYY-MM-DD' desde el que se cuenta
-    packPrice: 5,    // € por paquete
-    packSize: 20,    // cigarros por paquete
-    normalDay: 10,   // cigarros que me fumaría un día normal
-    partyDay: 20,    // cigarros que me fumaría un viernes/sábado de fiesta
+    packPrice: 5,    // € por cajetilla
+    packSize: 20,    // tereas por cajetilla
+    normalDay: 10,   // tereas en un día normal
+    partyDay: 20,    // tereas si salgo de fiesta
+    perBeer: 5,      // tereas por cada cerveza
   });
 
   // ---------- Fechas: siempre 'YYYY-MM-DD'; aritmética en UTC (sin líos de horario de verano)
@@ -45,9 +52,14 @@
   function weekday(s) {
     return parse(s).getUTCDay();
   }
-  function isFriSat(s) {
+  /** Jueves, viernes o sábado: los días en los que se pregunta por la fiesta */
+  function isPartyDay(s) {
     const w = weekday(s);
-    return w === 5 || w === 6;
+    return w === 4 || w === 5 || w === 6;
+  }
+  /** Lunes que abre la semana de esa fecha */
+  function mondayOf(s) {
+    return addDays(s, -((weekday(s) + 6) % 7));
   }
   /** Fecha local de hoy en 'YYYY-MM-DD' */
   function todayISO(now) {
@@ -58,41 +70,63 @@
       String(d.getDate()).padStart(2, '0')
     );
   }
-  /** Domingo que abre la semana de esa fecha */
-  function sundayOf(s) {
-    return addDays(s, -weekday(s));
-  }
 
-  // ---------- Ahorro de un día
-  function expectedCigs(date, party, settings) {
-    return isFriSat(date) && party ? settings.partyDay : settings.normalDay;
-  }
-  function savedCigs(date, entry, settings) {
-    return Math.max(0, expectedCigs(date, entry.party, settings) - entry.smoked);
-  }
-  /** Euros que valen esos cigarros, redondeado a céntimos sin errores de coma flotante */
-  function moneyFor(cigs, settings) {
-    const packCents = Math.round(settings.packPrice * 100);
-    return Math.round((cigs * packCents) / settings.packSize) / 100;
-  }
-  function daySavings(date, entry, settings) {
-    const cigs = savedCigs(date, entry, settings);
+  // ---------- Un día
+  /** Datos del día completos: lo que falte cuenta como 0 cervezas y sin fiesta */
+  function clean(date, entry) {
     return {
-      expected: expectedCigs(date, entry.party, settings),
-      cigs,
-      money: moneyFor(cigs, settings),
+      smoked: entry.smoked,
+      beers: entry.beers || 0,
+      party: isPartyDay(date) && !!entry.party,
+    };
+  }
+  function baseFor(date, entry, s) {
+    const e = clean(date, entry);
+    return Math.max(s.normalDay, e.party ? s.partyDay : 0, s.perBeer * e.beers);
+  }
+  /** Euros de N tereas, redondeado a céntimos (también negativos) sin errores de coma flotante */
+  function moneyFor(n, s) {
+    const packCents = Math.round(s.packPrice * 100);
+    const cents = Math.round((Math.abs(n) * packCents) / s.packSize);
+    return (n < 0 ? -cents : cents) / 100;
+  }
+  function colorFor(date, entry, s) {
+    const e = clean(date, entry);
+    if (!e.party && e.beers === 0) return e.smoked <= 1 ? 'green' : 'red';
+    const base = baseFor(date, e, s);
+    if (e.smoked < base) return 'green';
+    if (e.smoked === base) return 'amber';
+    return 'red';
+  }
+  function isTrophy(date, entry) {
+    const e = clean(date, entry);
+    return e.party && e.smoked === 0;
+  }
+  /** Todo lo de un día: base, ahorro (con signo), gasto, color y si es 🏆 */
+  function dayCalc(date, entry, s) {
+    const e = clean(date, entry);
+    const base = baseFor(date, e, s);
+    const saved = base - e.smoked;
+    return {
+      ...e,
+      base,
+      saved,
+      savedMoney: moneyFor(saved, s),
+      spent: e.smoked,
+      spentMoney: moneyFor(e.smoked, s),
+      color: colorFor(date, e, s),
+      special: e.party || e.beers > 0,
+      trophy: isTrophy(date, e),
     };
   }
 
-  // ---------- Estado de un día
+  // ---------- Estado de un día en el calendario
   /**
    * 'before'  antes de empezar a contar
    * 'future'  todavía no ha llegado
-   * 'today'   hoy, sin apuntar (no rompe la racha)
-   * 'pending' día pasado sin apuntar (rompe la racha hasta rellenarlo)
-   * 'clean'   0 cigarros
-   * 'one'     1 cigarro (no rompe la racha)
-   * 'broken'  2 o más (rompe la racha)
+   * 'today'   hoy, sin apuntar
+   * 'pending' día pasado sin apuntar
+   * 'green' | 'amber' | 'red'
    */
   function dayStatus(date, state, today) {
     const start = state.settings.startDate;
@@ -100,90 +134,78 @@
     if (date > today) return 'future';
     const e = state.days[date];
     if (!e) return date === today ? 'today' : 'pending';
-    if (e.smoked === 0) return 'clean';
-    if (e.smoked === 1) return 'one';
-    return 'broken';
-  }
-  function keepsStreak(status) {
-    return status === 'clean' || status === 'one';
+    return colorFor(date, e, state.settings);
   }
 
-  // ---------- Rachas
-  /** Días seguidos con 0 o 1 que llegan hasta hoy (o hasta ayer si hoy aún no está apuntado) */
-  function currentStreak(state, today) {
-    let d = today;
-    if (dayStatus(d, state, today) === 'today') d = addDays(d, -1);
-    let n = 0;
-    while (keepsStreak(dayStatus(d, state, today))) {
-      n++;
-      d = addDays(d, -1);
+  // ---------- Resúmenes
+  /** Suma de los días apuntados entre from y to (ambos incluidos), sin salirse de inicio–hoy */
+  function summarize(state, from, to, today) {
+    const s = state.settings;
+    const start = s.startDate;
+    const r = { saved: 0, smoked: 0, balance: 0, green: 0, amber: 0, red: 0, logged: 0, trophies: 0 };
+    if (!start) return withMoney(r, s);
+    for (const [d, entry] of Object.entries(state.days)) {
+      if (d < start || d > today || d < from || d > to) continue;
+      const c = dayCalc(d, entry, s);
+      r.logged++;
+      if (c.saved > 0) r.saved += c.saved;
+      r.smoked += c.smoked;
+      r.balance += c.saved;
+      r[c.color]++;
+      if (c.trophy) r.trophies++;
     }
-    return n;
+    return withMoney(r, s);
   }
-  function bestStreak(state, today) {
-    const start = state.settings.startDate;
-    if (!start) return 0;
-    let best = 0;
-    let run = 0;
-    for (let d = start; d <= today; d = addDays(d, 1)) {
-      const st = dayStatus(d, state, today);
-      if (keepsStreak(st)) {
-        run++;
-        if (run > best) best = run;
-      } else if (st !== 'today') {
-        run = 0;
+  function withMoney(r, s) {
+    r.savedMoney = moneyFor(r.saved, s);
+    r.spentMoney = moneyFor(r.smoked, s);
+    r.balanceMoney = moneyFor(r.balance, s);
+    r.packsSmoked = r.smoked / s.packSize;
+    return r;
+  }
+
+  /** Día en que se consiguió la ⭐ de la semana que empieza ese lunes (el 5.º verde), o null */
+  function weekStarDate(monday, state, today) {
+    let greens = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(monday, i);
+      if (dayStatus(d, state, today) === 'green') {
+        greens++;
+        if (greens === 5) return d;
       }
     }
-    return best;
+    return null;
   }
-
-  // ---------- Semana limpia (domingo a jueves)
-  function weekBlock(sunday, state, today) {
-    const days = [];
-    for (let i = 0; i < 5; i++) {
-      const date = addDays(sunday, i);
-      days.push({ date, status: dayStatus(date, state, today) });
-    }
-    return days;
-  }
-  /** Domingos de las semanas dom–jue completadas con 0 o 1 cada día */
-  function completedWeeks(state, today) {
+  /** Semanas con ⭐: [{ monday, date }] */
+  function starWeeks(state, today) {
     const start = state.settings.startDate;
     if (!start) return [];
     const out = [];
-    let sun = sundayOf(start);
-    if (sun < start) sun = addDays(sun, 7);
-    for (; sun <= today; sun = addDays(sun, 7)) {
-      if (weekBlock(sun, state, today).every((d) => keepsStreak(d.status))) out.push(sun);
+    for (let m = mondayOf(start); m <= today; m = addDays(m, 7)) {
+      const date = weekStarDate(m, state, today);
+      if (date) out.push({ monday: m, date });
     }
     return out;
   }
-
-  // ---------- Mega racha (cada viernes/sábado de fiesta con 0)
-  function isMegaNight(date, entry) {
-    return !!entry && isFriSat(date) && !!entry.party && entry.smoked === 0;
-  }
-  function megaNights(state, today) {
+  /** Días 🏆 (fiesta y 0 tereas) */
+  function trophyDays(state, today) {
     const start = state.settings.startDate;
     if (!start) return [];
     return Object.keys(state.days)
-      .filter((d) => d >= start && d <= today && isMegaNight(d, state.days[d]))
+      .filter((d) => d >= start && d <= today && isTrophy(d, state.days[d]))
       .sort();
   }
-
-  // ---------- Totales
+  function weekSummary(monday, state, today) {
+    const r = summarize(state, monday, addDays(monday, 6), today);
+    r.monday = monday;
+    r.starDate = weekStarDate(monday, state, today);
+    return r;
+  }
   function totals(state, today) {
-    const start = state.settings.startDate;
-    let cigs = 0, clean = 0, one = 0, broken = 0, logged = 0;
-    for (const [d, e] of Object.entries(state.days)) {
-      if (!start || d < start || d > today) continue;
-      logged++;
-      cigs += savedCigs(d, e, state.settings);
-      if (e.smoked === 0) clean++;
-      else if (e.smoked === 1) one++;
-      else broken++;
-    }
-    return { cigs, money: moneyFor(cigs, state.settings), clean, one, broken, logged };
+    const start = state.settings.startDate || today;
+    const r = summarize(state, start, today, today);
+    r.stars = starWeeks(state, today).length;
+    return r;
   }
   /** Días pasados (desde el inicio hasta ayer) sin apuntar */
   function pendingDays(state, today) {
@@ -195,14 +217,14 @@
   }
 
   // ---------- Celebraciones
-  /** Logros conseguidos: 'week:<domingo>' y 'mega:<fecha>'. Primero semanas, luego megas. */
+  /** Logros conseguidos: 'star:<lunes>' y 'trophy:<fecha>' */
   function achievementKeys(state, today) {
     return [
-      ...completedWeeks(state, today).map((d) => 'week:' + d),
-      ...megaNights(state, today).map((d) => 'mega:' + d),
+      ...starWeeks(state, today).map((w) => 'star:' + w.monday),
+      ...trophyDays(state, today).map((d) => 'trophy:' + d),
     ];
   }
-  /** Logros que todavía no se han celebrado */
+  /** Logros que todavía no se han celebrado (primero ⭐, luego 🏆, que es el más grande) */
   function newAchievements(state, today) {
     const done = state.celebrated || {};
     return achievementKeys(state, today).filter((k) => !done[k]);
@@ -210,13 +232,10 @@
 
   return {
     DEFAULT_SETTINGS,
-    parse, fmt, addDays, weekday, isFriSat, todayISO, sundayOf,
-    expectedCigs, savedCigs, moneyFor, daySavings,
-    dayStatus, keepsStreak,
-    currentStreak, bestStreak,
-    weekBlock, completedWeeks,
-    isMegaNight, megaNights,
-    totals, pendingDays,
+    parse, fmt, addDays, weekday, isPartyDay, mondayOf, todayISO,
+    clean, baseFor, moneyFor, colorFor, isTrophy, dayCalc,
+    dayStatus,
+    summarize, weekStarDate, starWeeks, trophyDays, weekSummary, totals, pendingDays,
     achievementKeys, newAchievements,
   };
 });

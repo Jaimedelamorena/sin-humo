@@ -1,7 +1,7 @@
 /* Sin Humo — service worker: la app abre aunque no haya conexión.
  * Primero intenta la red (para recibir actualizaciones); si tarda o no hay
  * conexión, usa la copia guardada. Sube CACHE al cambiar archivos. */
-const CACHE = 'sin-humo-v1';
+const CACHE = 'sin-humo-v2';
 const ASSETS = [
   './',
   './index.html',

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Sin Humo</title>
-  <meta name="description" content="Cuenta el dinero y los cigarros que te ahorras al dejar de fumar.">
+  <meta name="description" content="Cuenta el dinero y las tereas que te ahorras al dejar de fumar.">
   <meta name="theme-color" content="#f2f5f3" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0a1411" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -35,17 +35,21 @@
       <button class="icon-btn small" id="hint-close" type="button" aria-label="Cerrar aviso">✕</button>
     </div>
 
-    <section class="hero" aria-label="Lo que llevas ahorrado">
-      <div class="label">Has ahorrado</div>
-      <div class="money" id="stat-money">0,00 €</div>
+    <!-- Total acumulado -->
+    <section class="hero" aria-label="Total acumulado">
+      <div class="label">Balance total</div>
+      <div class="money" id="stat-balance">0,00 €</div>
+      <div class="hero-sub" id="stat-balance-cigs">Apunta tu primer día para empezar</div>
       <div class="hero-row">
         <div>
-          <div class="mid" id="stat-cigs">0</div>
-          <div class="label">cigarros sin fumar</div>
+          <div class="label">Ahorrado</div>
+          <div class="mid" id="stat-saved-money">0,00 €</div>
+          <div class="hero-small" id="stat-saved-cigs">0 tereas</div>
         </div>
         <div>
-          <div class="mid" id="stat-packs">0</div>
-          <div class="label">paquetes sin comprar</div>
+          <div class="label">Gastado</div>
+          <div class="mid" id="stat-spent-money">0,00 €</div>
+          <div class="hero-small" id="stat-spent-cigs">0 tereas</div>
         </div>
       </div>
     </section>
@@ -56,43 +60,53 @@
       <span class="banner-go">Rellenar ›</span>
     </button>
 
-    <section class="card streak-card" aria-label="Racha">
-      <div class="streak-main">
-        <div class="flame" id="flame" aria-hidden="true">🔥</div>
-        <div>
-          <div class="streak-num" id="stat-streak">0 días</div>
-          <div class="muted">de racha · mejor: <span id="stat-best">0 días</span></div>
+    <!-- Resumen de la semana (lunes a domingo) -->
+    <section class="card week-card" aria-label="Resumen de la semana">
+      <div class="week-nav">
+        <button class="icon-btn flat" id="week-prev" type="button" aria-label="Semana anterior">‹</button>
+        <div class="week-title">
+          <h2 id="week-title">Esta semana</h2>
+          <div class="muted small" id="week-range"></div>
         </div>
+        <button class="icon-btn flat" id="week-next" type="button" aria-label="Semana siguiente">›</button>
       </div>
-      <div class="week">
-        <div class="week-head"><span>Semana (dom–jue)</span><span class="week-count" id="week-count">0/5</span></div>
-        <div class="week-dots" id="week-dots"></div>
-        <p class="week-msg" id="week-msg"></p>
+      <div class="week-dots" id="week-dots"></div>
+      <p class="week-msg" id="week-msg"></p>
+      <div class="week-stats">
+        <div class="ws"><span class="ws-label">Ahorrado</span><b id="w-saved">0</b><span id="w-saved-money">0,00 €</span></div>
+        <div class="ws"><span class="ws-label">Gastado</span><b id="w-spent">0</b><span id="w-spent-money">0,00 €</span></div>
+        <div class="ws ws-balance"><span class="ws-label">Balance</span><b id="w-balance">0</b><span id="w-balance-money">0,00 €</span></div>
+      </div>
+      <div class="week-foot">
+        <span id="w-days"></span>
+        <span id="w-achievements"></span>
       </div>
     </section>
 
+    <!-- Logros totales -->
     <section class="trophies" aria-label="Logros">
-      <div class="trophy"><span class="t-emoji" aria-hidden="true">🏆</span><b id="stat-weeks">0</b><span>semanas limpias</span></div>
-      <div class="trophy t-mega"><span class="t-emoji" aria-hidden="true">🪩</span><b id="stat-megas">0</b><span>mega rachas</span></div>
-      <div class="trophy"><span class="t-emoji" aria-hidden="true">🚭</span><b id="stat-clean">0</b><span>días a cero</span></div>
+      <div class="trophy t-gold"><span class="t-emoji" aria-hidden="true">🏆</span><b id="stat-trophies">0</b><span>fiestas sin fumar</span></div>
+      <div class="trophy"><span class="t-emoji" aria-hidden="true">⭐</span><b id="stat-stars">0</b><span>semanas ⭐</span></div>
+      <div class="trophy"><span class="t-emoji" aria-hidden="true">✅</span><b id="stat-green">0</b><span>días verdes</span></div>
     </section>
 
     <section class="card calendar" aria-label="Calendario">
       <div class="cal-head">
-        <button class="icon-btn" id="cal-prev" type="button" aria-label="Mes anterior">‹</button>
+        <button class="icon-btn flat" id="cal-prev" type="button" aria-label="Mes anterior">‹</button>
         <h2 id="cal-title">—</h2>
-        <button class="icon-btn" id="cal-next" type="button" aria-label="Mes siguiente">›</button>
+        <button class="icon-btn flat" id="cal-next" type="button" aria-label="Mes siguiente">›</button>
       </div>
       <div class="cal-grid cal-dow" id="cal-dow" aria-hidden="true"></div>
       <div class="cal-grid" id="cal-days"></div>
       <ul class="legend">
-        <li><i class="sw sw-clean"></i>Sin fumar</li>
-        <li><i class="sw sw-one"></i>Solo 1</li>
-        <li><i class="sw sw-broken"></i>2 o más</li>
+        <li><i class="sw sw-green"></i>Día verde</li>
+        <li><i class="sw sw-amber"></i>Justo lo normal</li>
+        <li><i class="sw sw-red"></i>Día rojo</li>
         <li><i class="sw sw-pending"></i>Sin apuntar</li>
-        <li><span class="lg-emoji">🎉</span>Saliste de fiesta</li>
-        <li><i class="sw sw-mega"></i>Mega racha</li>
-        <li><span class="lg-emoji">🏆</span>Semana limpia</li>
+        <li><span class="lg-emoji">🎉</span>Fiesta</li>
+        <li><span class="lg-emoji">🍺</span>Cervezas</li>
+        <li><i class="sw sw-trophy"></i>🏆 Fiesta sin fumar</li>
+        <li><span class="lg-emoji">⭐</span>5.º día verde de la semana</li>
       </ul>
     </section>
 
@@ -110,20 +124,29 @@
     <div class="grabber" aria-hidden="true"></div>
     <h2 class="sheet-title" id="day-title">—</h2>
 
+    <div class="field">
+      <div class="field-label">1. ¿Cuántas cervezas te tomaste?</div>
+      <div class="stepper small">
+        <button type="button" id="beer-minus" aria-label="Una cerveza menos">−</button>
+        <output id="beer-value" aria-live="polite">0</output>
+        <button type="button" id="beer-plus" aria-label="Una cerveza más">+</button>
+      </div>
+    </div>
+
     <div class="field" id="party-row">
-      <div class="field-label">¿Has salido de fiesta?</div>
-      <div class="seg" role="radiogroup" aria-label="¿Has salido de fiesta?">
+      <div class="field-label">2. ¿Saliste de fiesta?</div>
+      <div class="seg" role="radiogroup" aria-label="¿Saliste de fiesta?">
         <button type="button" role="radio" data-party="0" aria-checked="false">No</button>
         <button type="button" role="radio" data-party="1" aria-checked="false">Sí 🎉</button>
       </div>
     </div>
 
     <div class="field">
-      <div class="field-label">¿Cuántos cigarros te has fumado?</div>
+      <div class="field-label" id="smoked-label">3. ¿Cuántas tereas fumaste?</div>
       <div class="stepper">
-        <button type="button" id="step-minus" aria-label="Uno menos">−</button>
+        <button type="button" id="step-minus" aria-label="Una menos">−</button>
         <output id="step-value" aria-live="polite">0</output>
-        <button type="button" id="step-plus" aria-label="Uno más">+</button>
+        <button type="button" id="step-plus" aria-label="Una más">+</button>
       </div>
       <div class="chips" id="chips"></div>
     </div>
@@ -148,20 +171,24 @@
 
     <div class="grid2">
       <label class="field">
-        <span class="field-label">Precio del paquete (€)</span>
+        <span class="field-label">Precio cajetilla (€)</span>
         <input type="text" inputmode="decimal" id="set-price" class="input" autocomplete="off">
       </label>
       <label class="field">
-        <span class="field-label">Cigarros por paquete</span>
+        <span class="field-label">Tereas por cajetilla</span>
         <input type="text" inputmode="numeric" pattern="[0-9]*" id="set-pack" class="input" autocomplete="off">
       </label>
       <label class="field">
-        <span class="field-label">Día normal (cigarros)</span>
+        <span class="field-label">Día normal (tereas)</span>
         <input type="text" inputmode="numeric" pattern="[0-9]*" id="set-normal" class="input" autocomplete="off">
       </label>
       <label class="field">
-        <span class="field-label">Vie/sáb de fiesta</span>
+        <span class="field-label">Día de fiesta (tereas)</span>
         <input type="text" inputmode="numeric" pattern="[0-9]*" id="set-party" class="input" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="field-label">Por cada cerveza</span>
+        <input type="text" inputmode="numeric" pattern="[0-9]*" id="set-beer" class="input" autocomplete="off">
       </label>
     </div>
     <p class="muted small" id="set-derived"></p>
@@ -184,15 +211,17 @@
   <section class="sheet" id="sheet-welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" hidden>
     <div class="grabber" aria-hidden="true"></div>
     <h2 class="sheet-title" id="welcome-title">Vamos a por ello 💪</h2>
-    <p>Cada día apuntas cuántos te has fumado y la app suma lo que te ahorras.</p>
+    <p>Cada día apuntas cervezas, si saliste de fiesta y cuántas tereas fumaste. La app compara con lo que fumarías normalmente.</p>
     <label class="field">
       <span class="field-label">¿Desde qué día empiezo a contar?</span>
       <input type="date" id="wel-start" class="input">
     </label>
     <ul class="rules">
-      <li>Paquete: <b>20 cigarros · 5,00 €</b> (0,25 € cada uno)</li>
-      <li>Día normal: <b>10 cigarros</b></li>
-      <li>Viernes o sábado de fiesta: <b>20 cigarros</b></li>
+      <li>Cajetilla: <b>20 tereas · 5,00 €</b> (0,25 € cada una)</li>
+      <li>Día normal: <b>10 tereas</b></li>
+      <li>Fiesta (jueves, viernes o sábado): <b>20 tereas</b></li>
+      <li>Cada cerveza: <b>5 tereas</b></li>
+      <li>Cuenta lo que sea mayor.</li>
     </ul>
     <p class="muted small">Puedes cambiarlo cuando quieras en Ajustes.</p>
     <button class="primary" id="wel-go" type="button">Empezar</button>

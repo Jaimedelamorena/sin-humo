@@ -3,188 +3,165 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const C = require('../calc.js');
 
-// Noviembre de 2026: dom 15, lun 16, mar 17, mié 18, jue 19, vie 20, sáb 21
-// (y la semana anterior: vie 13, sáb 14)
+// Noviembre de 2026: lun 16, mar 17, mié 18, jue 19, vie 20, sáb 21, dom 22
 const S = { ...C.DEFAULT_SETTINGS, startDate: '2026-11-01' };
 const mk = (days, startDate = '2026-11-01', celebrated = {}) => ({
   settings: { ...C.DEFAULT_SETTINGS, startDate },
   days,
   celebrated,
 });
-const zero = { smoked: 0, party: false };
-const one = { smoked: 1, party: false };
+const TUE = '2026-11-17';
+const THU = '2026-11-19';
+const pick = (c) => ({
+  base: c.base, saved: c.saved, savedMoney: c.savedMoney,
+  spent: c.spent, spentMoney: c.spentMoney, color: c.color, trophy: c.trophy,
+});
 
 test('fechas de referencia', () => {
-  assert.equal(C.weekday('2026-11-13'), 5); // viernes
-  assert.equal(C.weekday('2026-11-14'), 6); // sábado
-  assert.equal(C.weekday('2026-11-15'), 0); // domingo
-  assert.equal(C.weekday('2026-11-17'), 2); // martes
-  assert.equal(C.weekday('2026-11-19'), 4); // jueves
-  assert.equal(C.sundayOf('2026-11-19'), '2026-11-15');
-  assert.equal(C.addDays('2026-10-31', 1), '2026-11-01');
+  assert.equal(C.weekday('2026-11-16'), 1); // lunes
+  assert.equal(C.weekday(THU), 4);
+  assert.equal(C.weekday('2026-11-22'), 0); // domingo
+  assert.equal(C.mondayOf('2026-11-22'), '2026-11-16');
+  assert.equal(C.mondayOf('2026-11-16'), '2026-11-16');
+  assert.equal(C.mondayOf(THU), '2026-11-16');
+  assert.deepEqual(['2026-11-18', THU, '2026-11-20', '2026-11-21', '2026-11-22'].map(C.isPartyDay), [false, true, true, true, false]);
   assert.equal(C.addDays('2026-03-28', 2), '2026-03-30'); // cambio de hora
 });
 
-test('precio por cigarro: 5 € / 20 = 0,25 €', () => {
-  assert.equal(C.moneyFor(1, S), 0.25);
-  assert.equal(C.moneyFor(20, S), 5);
-});
-
-// ---------- Los tres ejemplos del enunciado
-test('Ejemplo: viernes, he salido y no me he fumado ninguno → 20 cigarros y 5 €', () => {
-  assert.deepEqual(C.daySavings('2026-11-13', { smoked: 0, party: true }, S), { expected: 20, cigs: 20, money: 5 });
-});
-test('Ejemplo: martes, me he fumado 1 → 9 cigarros y 2,25 €', () => {
-  assert.deepEqual(C.daySavings('2026-11-17', { smoked: 1, party: false }, S), { expected: 10, cigs: 9, money: 2.25 });
-});
-test('Ejemplo: sábado, no he salido y no me he fumado ninguno → 10 cigarros y 2,50 €', () => {
-  assert.deepEqual(C.daySavings('2026-11-14', { smoked: 0, party: false }, S), { expected: 10, cigs: 10, money: 2.5 });
-});
-
-// ---------- Resto de reglas de ahorro
-test('día normal sin fumar → 10 cigarros y 2,50 €', () => {
-  assert.deepEqual(C.daySavings('2026-11-18', zero, S), { expected: 10, cigs: 10, money: 2.5 });
-});
-test('domingo a jueves son siempre normales aunque se marque fiesta', () => {
-  for (const d of ['2026-11-15', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19']) {
-    assert.equal(C.expectedCigs(d, true, S), 10, d);
-  }
-  assert.equal(C.expectedCigs('2026-11-20', true, S), 20);
-  assert.equal(C.expectedCigs('2026-11-21', true, S), 20);
-  assert.equal(C.expectedCigs('2026-11-20', false, S), 10);
-});
-test('viernes de fiesta con 1 → 19 cigarros y 4,75 €', () => {
-  assert.deepEqual(C.daySavings('2026-11-20', { smoked: 1, party: true }, S), { expected: 20, cigs: 19, money: 4.75 });
-});
-test('fumar más de lo normal cuenta 0 y no resta', () => {
-  assert.deepEqual(C.daySavings('2026-11-17', { smoked: 14, party: false }, S), { expected: 10, cigs: 0, money: 0 });
-  assert.deepEqual(C.daySavings('2026-11-17', { smoked: 10, party: false }, S), { expected: 10, cigs: 0, money: 0 });
-});
-
-test('totales: suma de los días, sin contar antes del inicio ni el futuro', () => {
-  const st = mk(
-    {
-      '2026-11-10': zero,                       // antes del inicio: no cuenta
-      '2026-11-13': { smoked: 0, party: true }, // 20
-      '2026-11-14': { smoked: 0, party: false },// 10
-      '2026-11-17': one,                        // 9
-      '2026-11-18': { smoked: 14, party: false },// 0 (no resta)
-      '2026-11-25': zero,                       // futuro: no cuenta
-    },
-    '2026-11-12'
-  );
-  const t = C.totals(st, '2026-11-19');
-  assert.equal(t.cigs, 39);
-  assert.equal(t.money, 9.75);
-  assert.equal(t.clean, 2);
-  assert.equal(t.one, 1);
-  assert.equal(t.broken, 1);
-});
-
-test('dinero con otro precio no tiene errores de redondeo', () => {
-  const s = { ...S, packPrice: 5.3, packSize: 20 };
-  assert.equal(C.moneyFor(3, s), 0.8);
-  assert.equal(C.moneyFor(20, s), 5.3);
-  assert.equal(C.moneyFor(1000, S), 250);
-});
-
-// ---------- Estados del calendario
-test('estado del día: 0 sin fumar, 1 solo uno, 2+ rompe, pendiente, hoy, futuro, antes', () => {
-  const st = mk({ '2026-11-16': zero, '2026-11-17': one, '2026-11-18': { smoked: 2, party: false } }, '2026-11-15');
-  const t = '2026-11-19';
-  assert.equal(C.dayStatus('2026-11-14', st, t), 'before');
-  assert.equal(C.dayStatus('2026-11-15', st, t), 'pending');
-  assert.equal(C.dayStatus('2026-11-16', st, t), 'clean');
-  assert.equal(C.dayStatus('2026-11-17', st, t), 'one');
-  assert.equal(C.dayStatus('2026-11-18', st, t), 'broken');
-  assert.equal(C.dayStatus('2026-11-19', st, t), 'today');
-  assert.equal(C.dayStatus('2026-11-20', st, t), 'future');
-  assert.deepEqual(C.pendingDays(st, t), ['2026-11-15']);
-});
-
-// ---------- Rachas
-test('racha: 1 cigarro no rompe, 2 sí', () => {
-  const t = '2026-11-19';
-  const base = { '2026-11-15': zero, '2026-11-16': one, '2026-11-17': zero, '2026-11-18': one, '2026-11-19': zero };
-  assert.equal(C.currentStreak(mk(base, '2026-11-15'), t), 5);
-  const roto = { ...base, '2026-11-17': { smoked: 2, party: false } };
-  assert.equal(C.currentStreak(mk(roto, '2026-11-15'), t), 2);
-  assert.equal(C.bestStreak(mk(roto, '2026-11-15'), t), 2);
-});
-test('racha: hoy sin apuntar no la rompe; un día pasado sin apuntar sí', () => {
-  const t = '2026-11-19';
-  const st = mk({ '2026-11-15': zero, '2026-11-16': zero, '2026-11-17': zero, '2026-11-18': zero }, '2026-11-15');
-  assert.equal(C.currentStreak(st, t), 4); // hoy (jueves) aún sin apuntar
-  delete st.days['2026-11-16']; // se me olvida el lunes
-  assert.equal(C.currentStreak(st, t), 2);
-  assert.equal(C.bestStreak(st, t), 2);
-  st.days['2026-11-16'] = one; // lo relleno después: la racha vuelve
-  assert.equal(C.currentStreak(st, t), 4);
-});
-test('racha: cuenta también los findes; 2+ un sábado de fiesta la rompe', () => {
-  const t = '2026-11-16';
-  const st = mk({
-    '2026-11-12': zero,
-    '2026-11-13': { smoked: 0, party: true },
-    '2026-11-14': { smoked: 3, party: true },
-    '2026-11-15': zero,
-    '2026-11-16': zero,
-  }, '2026-11-12');
-  assert.equal(C.currentStreak(st, t), 2);
-  assert.equal(C.bestStreak(st, t), 2);
-});
-test('racha: hoy con 2+ la deja a 0', () => {
-  const st = mk({ '2026-11-18': zero, '2026-11-19': { smoked: 4, party: false } }, '2026-11-18');
-  assert.equal(C.currentStreak(st, '2026-11-19'), 0);
-});
-
-// ---------- Semana limpia (domingo a jueves)
-const fullWeek = { '2026-11-15': zero, '2026-11-16': one, '2026-11-17': zero, '2026-11-18': one, '2026-11-19': zero };
-test('semana dom–jue con 0 o 1 cada día → semana limpia', () => {
-  assert.deepEqual(C.completedWeeks(mk(fullWeek), '2026-11-19'), ['2026-11-15']);
-});
-test('semana con un 2, con un día sin apuntar o sin terminar → no', () => {
-  assert.deepEqual(C.completedWeeks(mk({ ...fullWeek, '2026-11-17': { smoked: 2, party: false } }), '2026-11-19'), []);
-  const sinMartes = { ...fullWeek };
-  delete sinMartes['2026-11-17'];
-  assert.deepEqual(C.completedWeeks(mk(sinMartes), '2026-11-19'), []);
-  const sinJueves = { ...fullWeek };
-  delete sinJueves['2026-11-19'];
-  assert.deepEqual(C.completedWeeks(mk(sinJueves), '2026-11-19'), []); // jueves = hoy, aún sin apuntar
-});
-test('el finde no afecta a la semana limpia', () => {
-  const st = mk({ ...fullWeek, '2026-11-20': { smoked: 15, party: true }, '2026-11-21': { smoked: 8, party: false } });
-  assert.deepEqual(C.completedWeeks(st, '2026-11-21'), ['2026-11-15']);
-});
-test('semana que empieza antes de la fecha de inicio no cuenta', () => {
-  assert.deepEqual(C.completedWeeks(mk(fullWeek, '2026-11-16'), '2026-11-19'), []);
-});
-test('5 días entre semana repartidos entre dos semanas no cuentan', () => {
-  const st = mk({
-    '2026-11-11': zero, '2026-11-12': zero, // mié, jue
-    '2026-11-15': zero, '2026-11-16': zero, '2026-11-17': zero, // dom, lun, mar
-  }, '2026-11-11');
-  assert.deepEqual(C.completedWeeks(st, '2026-11-17'), []);
-});
-
-// ---------- Mega racha (cada noche de fiesta con 0)
-test('mega racha: cada viernes o sábado de fiesta con 0', () => {
-  const st = mk({
-    '2026-11-13': { smoked: 0, party: true },  // sí
-    '2026-11-14': { smoked: 0, party: true },  // sí (dos en el mismo finde)
-    '2026-11-20': { smoked: 0, party: false }, // no salí: no
-    '2026-11-21': { smoked: 1, party: true },  // 1 cigarro: no
+// ---------- Los 8 ejemplos del enunciado
+const EJEMPLOS = [
+  ['Día normal, 1', TUE, { smoked: 1 }, { base: 10, saved: 9, savedMoney: 2.25, spent: 1, spentMoney: 0.25, color: 'green', trophy: false }],
+  ['Día normal, 4', TUE, { smoked: 4 }, { base: 10, saved: 6, savedMoney: 1.5, spent: 4, spentMoney: 1, color: 'red', trophy: false }],
+  ['Día normal, 12', TUE, { smoked: 12 }, { base: 10, saved: -2, savedMoney: -0.5, spent: 12, spentMoney: 3, color: 'red', trophy: false }],
+  ['Jueves de fiesta, 10', THU, { smoked: 10, party: true }, { base: 20, saved: 10, savedMoney: 2.5, spent: 10, spentMoney: 2.5, color: 'green', trophy: false }],
+  ['Jueves de fiesta, 20', THU, { smoked: 20, party: true }, { base: 20, saved: 0, savedMoney: 0, spent: 20, spentMoney: 5, color: 'amber', trophy: false }],
+  ['Jueves de fiesta, 0 → 🏆', THU, { smoked: 0, party: true }, { base: 20, saved: 20, savedMoney: 5, spent: 0, spentMoney: 0, color: 'green', trophy: true }],
+  ['3 cervezas, 5', TUE, { smoked: 5, beers: 3 }, { base: 15, saved: 10, savedMoney: 2.5, spent: 5, spentMoney: 1.25, color: 'green', trophy: false }],
+  ['Jueves sin salir, 2', THU, { smoked: 2, party: false }, { base: 10, saved: 8, savedMoney: 2, spent: 2, spentMoney: 0.5, color: 'red', trophy: false }],
+];
+for (const [name, date, entry, want] of EJEMPLOS) {
+  test(`Ejemplo: ${name}`, () => {
+    assert.deepEqual(pick(C.dayCalc(date, entry, S)), want);
   });
-  assert.deepEqual(C.megaNights(st, '2026-11-21'), ['2026-11-13', '2026-11-14']);
+}
+
+// ---------- Base del día
+test('base = el mayor entre 10, 20 si fiesta y 5 × cervezas', () => {
+  assert.equal(C.baseFor(TUE, { smoked: 0 }, S), 10);
+  assert.equal(C.baseFor(TUE, { smoked: 0, beers: 2 }, S), 10);
+  assert.equal(C.baseFor(TUE, { smoked: 0, beers: 3 }, S), 15);
+  assert.equal(C.baseFor(THU, { smoked: 0, party: true, beers: 3 }, S), 20);
+  assert.equal(C.baseFor(THU, { smoked: 0, party: true, beers: 6 }, S), 30);
+});
+test('la fiesta solo cuenta jueves, viernes y sábado', () => {
+  assert.equal(C.baseFor('2026-11-18', { smoked: 0, party: true }, S), 10); // miércoles
+  assert.equal(C.baseFor('2026-11-22', { smoked: 0, party: true }, S), 10); // domingo
+  assert.equal(C.baseFor('2026-11-20', { smoked: 0, party: true }, S), 20); // viernes
+  assert.equal(C.baseFor('2026-11-21', { smoked: 0, party: true }, S), 20); // sábado
+  assert.equal(C.isTrophy('2026-11-18', { smoked: 0, party: true }), false);
+});
+test('días guardados con la versión anterior: sin cervezas ni fiesta cuentan como 0 y no', () => {
+  assert.deepEqual(pick(C.dayCalc(THU, { smoked: 0 }, S)), { base: 10, saved: 10, savedMoney: 2.5, spent: 0, spentMoney: 0, color: 'green', trophy: false });
+  assert.equal(C.dayCalc('2026-11-20', { smoked: 0, party: true }, S).trophy, true); // viernes de fiesta antiguo
+});
+
+// ---------- Color
+test('día normal: verde con 0 o 1, rojo con 2 o más (aunque sea 10)', () => {
+  assert.equal(C.colorFor(TUE, { smoked: 0 }, S), 'green');
+  assert.equal(C.colorFor(TUE, { smoked: 1 }, S), 'green');
+  assert.equal(C.colorFor(TUE, { smoked: 2 }, S), 'red');
+  assert.equal(C.colorFor(TUE, { smoked: 10 }, S), 'red');
+});
+test('con 1 sola cerveza ya es día de cervezas: verde < base, ámbar = base, rojo > base', () => {
+  assert.equal(C.colorFor(TUE, { smoked: 9, beers: 1 }, S), 'green');
+  assert.equal(C.colorFor(TUE, { smoked: 10, beers: 1 }, S), 'amber');
+  assert.equal(C.colorFor(TUE, { smoked: 11, beers: 1 }, S), 'red');
+  assert.equal(C.colorFor(TUE, { smoked: 15, beers: 3 }, S), 'amber');
+});
+
+// ---------- Dinero
+test('dinero sin errores de redondeo, también en negativo', () => {
+  assert.equal(C.moneyFor(1, S), 0.25);
+  assert.equal(C.moneyFor(-2, S), -0.5);
+  assert.equal(C.moneyFor(1000, S), 250);
+  const s = { ...S, packPrice: 5.3 };
+  assert.equal(C.moneyFor(3, s), 0.8);
+  assert.equal(C.moneyFor(-3, s), -0.8);
+});
+
+// ---------- Resúmenes: ahorro solo positivo, balance con todo, sin restar dos veces
+test('resumen: ahorrado solo suma lo positivo; el balance suma (base − fumadas) de todo', () => {
+  const st = mk({
+    '2026-11-16': { smoked: 1 },                 // +9
+    '2026-11-17': { smoked: 12 },                // −2
+    '2026-11-19': { smoked: 0, party: true },    // +20 🏆
+    '2026-11-20': { smoked: 20, party: true },   // 0 ámbar
+    '2026-11-21': { smoked: 5, beers: 3 },       // +10
+  }, '2026-11-16');
+  const r = C.totals(st, '2026-11-22');
+  assert.equal(r.saved, 39);
+  assert.equal(r.savedMoney, 9.75);
+  assert.equal(r.smoked, 38);
+  assert.equal(r.spentMoney, 9.5);
+  assert.equal(r.balance, 37);          // 9 − 2 + 20 + 0 + 10
+  assert.equal(r.balanceMoney, 9.25);
+  assert.notEqual(r.balance, r.saved - r.smoked); // el balance NO es ahorro − gasto
+  assert.equal(r.green, 3);
+  assert.equal(r.amber, 1);
+  assert.equal(r.red, 1);
+  assert.equal(r.trophies, 1);
+  assert.equal(r.packsSmoked, 1.9);
+});
+test('el total puede quedar en negativo y los días sin apuntar no cuentan', () => {
+  const st = mk({ '2026-11-16': { smoked: 15 }, '2026-11-18': { smoked: 11 } }, '2026-11-16');
+  const r = C.totals(st, '2026-11-18');
+  assert.equal(r.balance, -6);
+  assert.equal(r.balanceMoney, -1.5);
+  assert.equal(r.saved, 0);
+  assert.deepEqual(C.pendingDays(st, '2026-11-18'), ['2026-11-17']);
+});
+test('no cuentan días antes del inicio ni futuros', () => {
+  const st = mk({ '2026-11-10': { smoked: 0 }, '2026-11-17': { smoked: 0 }, '2026-11-25': { smoked: 0 } }, '2026-11-16');
+  assert.equal(C.totals(st, '2026-11-19').balance, 10);
+});
+
+// ---------- ⭐ Semana (lunes a domingo)
+test('⭐ con el 5.º día verde de la semana, aunque no haya terminado; los 🏆 cuentan', () => {
+  const st = mk({
+    '2026-11-16': { smoked: 0 },
+    '2026-11-17': { smoked: 3 },                // rojo, no cuenta pero no reinicia
+    '2026-11-18': { smoked: 1 },
+    '2026-11-19': { smoked: 0, party: true },   // 🏆 (verde)
+    '2026-11-20': { smoked: 20, party: true },  // ámbar, no cuenta
+    '2026-11-21': { smoked: 9, beers: 2 },      // verde
+  });
+  assert.equal(C.weekStarDate('2026-11-16', st, '2026-11-21'), null); // 4 verdes
+  st.days['2026-11-22'] = { smoked: 1 };
+  assert.equal(C.weekStarDate('2026-11-16', st, '2026-11-22'), '2026-11-22');
+  assert.deepEqual(C.starWeeks(st, '2026-11-22'), [{ monday: '2026-11-16', date: '2026-11-22' }]);
+});
+test('⭐ como máximo una por semana y no se juntan semanas distintas', () => {
+  const days = {};
+  for (let i = 0; i < 7; i++) days[C.addDays('2026-11-16', i)] = { smoked: 0 };
+  const st = mk(days);
+  assert.equal(C.starWeeks(st, '2026-11-22').length, 1);
+  assert.equal(C.weekStarDate('2026-11-16', st, '2026-11-22'), '2026-11-20');
+  const split = mk({
+    '2026-11-13': { smoked: 0 }, '2026-11-14': { smoked: 0 }, '2026-11-15': { smoked: 0 }, // vie–dom
+    '2026-11-16': { smoked: 0 }, '2026-11-17': { smoked: 0 },                               // lun–mar
+  });
+  assert.equal(C.starWeeks(split, '2026-11-17').length, 0);
 });
 
 // ---------- Celebraciones
-test('celebraciones: no se repiten y van primero semanas y luego megas', () => {
-  const st = mk({ ...fullWeek, '2026-11-20': { smoked: 0, party: true } });
+test('celebraciones: no se repiten; primero ⭐ y luego 🏆', () => {
+  const days = {};
+  for (let i = 0; i < 4; i++) days[C.addDays('2026-11-16', i)] = { smoked: 0 };
+  days['2026-11-20'] = { smoked: 0, party: true };
+  const st = mk(days);
   const t = '2026-11-20';
-  assert.deepEqual(C.newAchievements(st, t), ['week:2026-11-15', 'mega:2026-11-20']);
-  st.celebrated['week:2026-11-15'] = true;
-  assert.deepEqual(C.newAchievements(st, t), ['mega:2026-11-20']);
-  st.celebrated['mega:2026-11-20'] = true;
+  assert.deepEqual(C.newAchievements(st, t), ['star:2026-11-16', 'trophy:2026-11-20']);
+  st.celebrated['star:2026-11-16'] = true;
+  st.celebrated['trophy:2026-11-20'] = true;
   assert.deepEqual(C.newAchievements(st, t), []);
 });
